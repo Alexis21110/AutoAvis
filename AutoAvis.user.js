@@ -3,8 +3,8 @@
 // @namespace    https://vine-local/
 // @version      8.0.0
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
-// @updateURL    https://raw.githubusercontent.com/VOTRE-UTILISATEUR/VOTRE-DEPOT/main/amazon-vine-auto-avis.user.js
-// @downloadURL  https://raw.githubusercontent.com/VOTRE-UTILISATEUR/VOTRE-DEPOT/main/amazon-vine-auto-avis.user.js
+// @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
+// @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @match        https://www.amazon.fr/vine/*
 // @match        https://www.amazon.fr/review/create-review*
 // @match        https://chatgpt.com/*
