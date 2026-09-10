@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.1.1
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.1.2
 // @namespace    https://vine-local/
-// @version      8.1.1
+// @version      8.1.2
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -470,105 +470,77 @@ Consignes:
       box.querySelector('#vcs-msg').textContent = msg;
     }
 
-    function waitPageInsert(prompt, timeout=25000){
-      return new Promise(resolve=>{
-        const done = (ev)=>{
-          document.removeEventListener('vine-auto-avis-page-status', done);
-          resolve(ev.detail || {ok:false, step:'unknown'});
-        };
-        document.addEventListener('vine-auto-avis-page-status', done);
-        setTimeout(()=>{
-          document.removeEventListener('vine-auto-avis-page-status', done);
-          resolve({ok:false, step:'timeout'});
-        }, timeout);
+    async function insertPromptDirect(prompt){
+      const findComposer = () => {
+        const sels = [
+          'div#prompt-textarea.ProseMirror[contenteditable="true"]',
+          '#prompt-textarea[contenteditable="true"]',
+          '.ProseMirror[contenteditable="true"]',
+          'div[role="textbox"][contenteditable="true"]',
+          'main form [contenteditable="true"]',
+          'textarea[name="prompt-textarea"]',
+          'main form textarea'
+        ];
+        for (const s of sels){
+          const el = [...document.querySelectorAll(s)].find(visible);
+          if (el) return el;
+        }
+        return null;
+      };
+      const getText = el => el.tagName === 'TEXTAREA' ? (el.value || '') : (el.innerText || el.textContent || '');
+      const fire = (el, text) => {
+        try{ el.dispatchEvent(new InputEvent('beforeinput', {bubbles:true, composed:true, inputType:'insertText', data:text})); }catch{}
+        try{ el.dispatchEvent(new InputEvent('input', {bubbles:true, composed:true, inputType:'insertText', data:text})); }catch{}
+        try{ el.dispatchEvent(new Event('change', {bubbles:true})); }catch{}
+        try{ el.closest('form')?.dispatchEvent(new Event('input', {bubbles:true})); }catch{}
+      };
+      const setDomFallback = (el, text) => {
+        if (el.tagName === 'TEXTAREA'){
+          const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;
+          if(setter) setter.call(el, text); else el.value = text;
+          return;
+        }
+        el.innerHTML = '';
+        text.split('\n').forEach(line=>{
+          const p=document.createElement('p');
+          p.setAttribute('dir','auto');
+          if(line) p.textContent=line; else p.appendChild(document.createElement('br'));
+          el.appendChild(p);
+        });
+      };
 
-        const script = document.createElement('script');
-        script.textContent = `
-          (async function(prompt){
-            const sendStatus = detail => document.dispatchEvent(new CustomEvent('vine-auto-avis-page-status', { detail }));
-            const sleep = ms => new Promise(r => setTimeout(r, ms));
-            const isVisible = el => {
-              if (!el) return false;
-              const st = getComputedStyle(el);
-              return st.display !== 'none' && st.visibility !== 'hidden' && el.getClientRects().length > 0;
-            };
-            const findComposer = () => {
-              const sels = [
-                'div#prompt-textarea.ProseMirror[contenteditable="true"]',
-                '#prompt-textarea[contenteditable="true"]',
-                '.ProseMirror[contenteditable="true"]',
-                'div[role="textbox"][contenteditable="true"]',
-                'main form [contenteditable="true"]',
-                'textarea[name="prompt-textarea"]',
-                'main form textarea'
-              ];
-              for (const s of sels){
-                const el = [...document.querySelectorAll(s)].find(isVisible);
-                if (el) return el;
-              }
-              return null;
-            };
-            const getText = el => el.tagName === 'TEXTAREA' ? (el.value || '') : (el.innerText || el.textContent || '');
-            const selectAll = el => {
-              el.focus();
-              el.click();
-              if (el.tagName === 'TEXTAREA'){
-                el.value = '';
-                return;
-              }
-              const range = document.createRange();
-              range.selectNodeContents(el);
-              const sel = getSelection();
-              sel.removeAllRanges();
-              sel.addRange(range);
-            };
-            const setDomFallback = (el, text) => {
-              if (el.tagName === 'TEXTAREA'){
-                el.value = text;
-                return;
-              }
-              el.innerHTML = '';
-              text.split('\\n').forEach(line => {
-                const p = document.createElement('p');
-                p.setAttribute('dir', 'auto');
-                if (line) p.textContent = line;
-                else p.appendChild(document.createElement('br'));
-                el.appendChild(p);
-              });
-            };
-            const fire = (el, text) => {
-              try{ el.dispatchEvent(new InputEvent('beforeinput', {bubbles:true, composed:true, inputType:'insertText', data:text})); }catch{}
-              try{ el.dispatchEvent(new InputEvent('input', {bubbles:true, composed:true, inputType:'insertText', data:text})); }catch{}
-              try{ el.dispatchEvent(new Event('change', {bubbles:true})); }catch{}
-              try{ el.closest('form')?.dispatchEvent(new Event('input', {bubbles:true})); }catch{}
-            };
+      let el = null;
+      for(let i=0;i<200;i++){
+        el = findComposer();
+        if(el) break;
+        if(i % 10 === 0) chatStatus(`Insertion du prompt dans ChatGPT... attente du champ (${Math.floor(i/10)}s)`);
+        await wait(100);
+      }
+      if(!el) return {ok:false, step:'composer-not-found'};
 
-            let el = null;
-            for (let i=0; i<200; i++){
-              el = findComposer();
-              if (el) break;
-              await sleep(100);
-            }
-            if (!el) return sendStatus({ok:false, step:'composer-not-found'});
+      el.focus();
+      el.click();
+      await wait(120);
 
-            selectAll(el);
-            await sleep(80);
-            let inserted = false;
-            if (el.tagName !== 'TEXTAREA'){
-              try{ document.execCommand('delete', false, null); }catch{}
-              try{ inserted = document.execCommand('insertText', false, prompt); }catch{}
-            }
-            if (!inserted) setDomFallback(el, prompt);
-            fire(el, prompt);
-            await sleep(250);
+      let inserted = false;
+      if(el.tagName === 'TEXTAREA'){
+        setDomFallback(el, prompt);
+        inserted = true;
+      }else{
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        try{ document.execCommand('delete', false, null); }catch{}
+        try{ inserted = document.execCommand('insertText', false, prompt); }catch{}
+        if(!inserted) setDomFallback(el, prompt);
+      }
+      fire(el, prompt);
+      await wait(300);
 
-            const ok = getText(el).includes(prompt.slice(0, 40));
-            sendStatus({ok, step:ok?'inserted':'not-in-dom', textLength:getText(el).length, tag:el.tagName, id:el.id || '', cls:el.className || ''});
-          })(${JSON.stringify(prompt)});
-        `;
-        document.documentElement.appendChild(script);
-        script.remove();
-      });
+      const ok = getText(el).includes(prompt.slice(0, 40));
+      return {ok, step:ok?'inserted':'not-in-dom', textLength:getText(el).length, tag:el.tagName, id:el.id || '', cls:String(el.className || '')};
     }
     function clickSend(){
       const btns=[...document.querySelectorAll('button')].filter(b=>{
@@ -627,7 +599,7 @@ Consignes:
       await wait(3500);
 
       chatStatus('Insertion du prompt dans ChatGPT...');
-      const insertResult = await waitPageInsert(prompt);
+      const insertResult = await insertPromptDirect(prompt);
       if(!insertResult.ok){
         await copy(prompt);
         GM_setValue('vine_chat_active','');
