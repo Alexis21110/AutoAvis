@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.1.0
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.1.1
 // @namespace    https://vine-local/
-// @version      8.1.0
+// @version      8.1.1
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -444,8 +444,6 @@ Consignes:
     if (window.__vineAutoAvisStarted) return;
     const chatToken = GM_getValue('vine_chat_active','');
     if(!location.search.includes('vine=1') && !chatToken) return;
-    if(chatToken && sessionStorage.getItem('vine_auto_avis_token') === chatToken) return;
-    if(chatToken) sessionStorage.setItem('vine_auto_avis_token', chatToken);
     window.__vineAutoAvisStarted = true;
     const log = logBox('Vine Helper (ChatGPT)');
     const waitEl = async (fn, tries=40)=>{ for(let i=0;i<tries;i++){ const v=fn(); if(v) return v; await wait(100); } return null; };
@@ -472,7 +470,7 @@ Consignes:
       box.querySelector('#vcs-msg').textContent = msg;
     }
 
-    function waitPageInsert(prompt, timeout=10000){
+    function waitPageInsert(prompt, timeout=25000){
       return new Promise(resolve=>{
         const done = (ev)=>{
           document.removeEventListener('vine-auto-avis-page-status', done);
@@ -546,7 +544,7 @@ Consignes:
             };
 
             let el = null;
-            for (let i=0; i<80; i++){
+            for (let i=0; i<200; i++){
               el = findComposer();
               if (el) break;
               await sleep(100);
@@ -625,10 +623,8 @@ Consignes:
         chatStatus('Aucun prompt reçu depuis Amazon. Relance depuis le bouton Auto-avis.');
         return;
       }
-      chatStatus('Prompt reçu. Préparation de ChatGPT...');
-
-      const newBtn=[...document.querySelectorAll('a,button')].find(b=>/(nouveau chat|new chat)/i.test(b.textContent||''));
-      if(newBtn){ newBtn.click(); await wait(500); }
+      chatStatus('Prompt reçu. Attente du chargement complet de ChatGPT...');
+      await wait(3500);
 
       chatStatus('Insertion du prompt dans ChatGPT...');
       const insertResult = await waitPageInsert(prompt);
