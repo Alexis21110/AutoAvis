@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.1.2
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.1.3
 // @namespace    https://vine-local/
-// @version      8.1.2
+// @version      8.1.3
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -488,11 +488,39 @@ Consignes:
         return null;
       };
       const getText = el => el.tagName === 'TEXTAREA' ? (el.value || '') : (el.innerText || el.textContent || '');
+      const placeCaretInEditable = el => {
+        el.focus();
+        el.click();
+        if(el.tagName === 'TEXTAREA') return;
+        el.querySelectorAll('[data-placeholder], .placeholder, [data-empty-paragraph]').forEach(n=>n.remove());
+        if(!el.querySelector('p')){
+          const p=document.createElement('p');
+          p.setAttribute('dir','auto');
+          p.appendChild(document.createElement('br'));
+          el.appendChild(p);
+        }
+        const target = el.querySelector('p') || el;
+        const range = document.createRange();
+        range.selectNodeContents(target);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      };
       const fire = (el, text) => {
         try{ el.dispatchEvent(new InputEvent('beforeinput', {bubbles:true, composed:true, inputType:'insertText', data:text})); }catch{}
         try{ el.dispatchEvent(new InputEvent('input', {bubbles:true, composed:true, inputType:'insertText', data:text})); }catch{}
         try{ el.dispatchEvent(new Event('change', {bubbles:true})); }catch{}
         try{ el.closest('form')?.dispatchEvent(new Event('input', {bubbles:true})); }catch{}
+      };
+      const pasteInto = (el, text) => {
+        try{
+          const dt = new DataTransfer();
+          dt.setData('text/plain', text);
+          return el.dispatchEvent(new ClipboardEvent('paste', {bubbles:true, composed:true, clipboardData:dt}));
+        }catch{
+          return false;
+        }
       };
       const setDomFallback = (el, text) => {
         if (el.tagName === 'TEXTAREA'){
@@ -527,13 +555,15 @@ Consignes:
         setDomFallback(el, prompt);
         inserted = true;
       }else{
-        const range = document.createRange();
-        range.selectNodeContents(el);
-        const sel = window.getSelection();
-        sel.removeAllRanges();
-        sel.addRange(range);
-        try{ document.execCommand('delete', false, null); }catch{}
-        try{ inserted = document.execCommand('insertText', false, prompt); }catch{}
+        placeCaretInEditable(el);
+        await wait(80);
+        pasteInto(el, prompt);
+        await wait(150);
+        inserted = getText(el).includes(prompt.slice(0, 40));
+        if(!inserted){
+          placeCaretInEditable(el);
+          try{ inserted = document.execCommand('insertText', false, prompt); }catch{}
+        }
         if(!inserted) setDomFallback(el, prompt);
       }
       fire(el, prompt);
@@ -603,7 +633,7 @@ Consignes:
       if(!insertResult.ok){
         await copy(prompt);
         GM_setValue('vine_chat_active','');
-        chatStatus(`Insertion échouée (${insertResult.step}). Prompt copié: colle-le avec Ctrl+V puis envoie.`);
+        chatStatus(`Insertion échouée (${insertResult.step}, ${insertResult.tag || '?'}, ${insertResult.textLength || 0} car.). Prompt copié: Ctrl+V puis envoie.`);
         return;
       }
       chatStatus('Prompt inséré. Tentative d’envoi...');
