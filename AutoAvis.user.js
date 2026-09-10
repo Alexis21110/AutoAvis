@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.0.1
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.1.0
 // @namespace    https://vine-local/
-// @version      8.0.1
+// @version      8.1.0
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -13,6 +13,7 @@
 // @grant        GM_getValue
 // @grant        GM_openInTab
 // @grant        GM_addValueChangeListener
+// @grant        GM_setClipboard
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -51,7 +52,11 @@
     const el = box.querySelector(`#${id}-in`);
     return (m)=>{ const t=new Date().toLocaleTimeString(); el.textContent+=`• [${t}] ${m}\n`; el.scrollTop=el.scrollHeight; };
   }
-  const copy = async (txt)=>{ try{ await navigator.clipboard.writeText(txt); }catch{} };
+  const copy = async (txt)=>{
+    try{ if(typeof GM_setClipboard === 'function'){ GM_setClipboard(txt, 'text'); return true; } }catch{}
+    try{ await navigator.clipboard.writeText(txt); return true; }catch{}
+    return false;
+  };
 
   // ---------- parse JSON robuste ----------
   function parseJSONLoose(text){
@@ -467,84 +472,105 @@ Consignes:
       box.querySelector('#vcs-msg').textContent = msg;
     }
 
-    function findComposer(){
-      const sels = [
-        'div#prompt-textarea.ProseMirror',
-        '#prompt-textarea[contenteditable="true"]',
-        '.ProseMirror[contenteditable="true"]',
-        'div[contenteditable="true"][translate="no"]',
-        'div[role="textbox"][contenteditable="true"]',
-        '[aria-label*="Message"][contenteditable="true"]',
-        '[aria-label*="message"][contenteditable="true"]',
-        'main form textarea',
-        'textarea',
-        'main form [contenteditable="true"]',
-        '[contenteditable="true"][role="textbox"]',
-        '[contenteditable="true"]',
-        '[data-testid="composer-input"]'
-      ];
-      for (const s of sels){
-        const el=[...document.querySelectorAll(s)].find(visible);
-        if(!el) continue;
-        if(el.tagName==='TEXTAREA') return {el,type:'textarea'};
-        if(el.isContentEditable || el.getAttribute('contenteditable') === 'true') return {el,type:'ce'};
-        const inner = el.querySelector('textarea, [contenteditable="true"]');
-        if(inner && visible(inner)){
-          return {el:inner,type:inner.tagName==='TEXTAREA'?'textarea':'ce'};
-        }
-      }
-      return null;
-    }
-    function composerText(cmp){
-      return cmp.type==='textarea' ? (cmp.el.value || '') : (cmp.el.innerText || cmp.el.textContent || '');
-    }
-    function selectEditable(el){
-      el.focus();
-      const sel = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    }
-    function setProseMirrorDOM(el,text){
-      el.innerHTML = '';
-      text.split('\n').forEach(line=>{
-        const p=document.createElement('p');
-        p.setAttribute('dir','auto');
-        if(line){
-          p.textContent = line;
-        }else{
-          p.appendChild(document.createElement('br'));
-        }
-        el.appendChild(p);
+    function waitPageInsert(prompt, timeout=10000){
+      return new Promise(resolve=>{
+        const done = (ev)=>{
+          document.removeEventListener('vine-auto-avis-page-status', done);
+          resolve(ev.detail || {ok:false, step:'unknown'});
+        };
+        document.addEventListener('vine-auto-avis-page-status', done);
+        setTimeout(()=>{
+          document.removeEventListener('vine-auto-avis-page-status', done);
+          resolve({ok:false, step:'timeout'});
+        }, timeout);
+
+        const script = document.createElement('script');
+        script.textContent = `
+          (async function(prompt){
+            const sendStatus = detail => document.dispatchEvent(new CustomEvent('vine-auto-avis-page-status', { detail }));
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const isVisible = el => {
+              if (!el) return false;
+              const st = getComputedStyle(el);
+              return st.display !== 'none' && st.visibility !== 'hidden' && el.getClientRects().length > 0;
+            };
+            const findComposer = () => {
+              const sels = [
+                'div#prompt-textarea.ProseMirror[contenteditable="true"]',
+                '#prompt-textarea[contenteditable="true"]',
+                '.ProseMirror[contenteditable="true"]',
+                'div[role="textbox"][contenteditable="true"]',
+                'main form [contenteditable="true"]',
+                'textarea[name="prompt-textarea"]',
+                'main form textarea'
+              ];
+              for (const s of sels){
+                const el = [...document.querySelectorAll(s)].find(isVisible);
+                if (el) return el;
+              }
+              return null;
+            };
+            const getText = el => el.tagName === 'TEXTAREA' ? (el.value || '') : (el.innerText || el.textContent || '');
+            const selectAll = el => {
+              el.focus();
+              el.click();
+              if (el.tagName === 'TEXTAREA'){
+                el.value = '';
+                return;
+              }
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              const sel = getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+            };
+            const setDomFallback = (el, text) => {
+              if (el.tagName === 'TEXTAREA'){
+                el.value = text;
+                return;
+              }
+              el.innerHTML = '';
+              text.split('\\n').forEach(line => {
+                const p = document.createElement('p');
+                p.setAttribute('dir', 'auto');
+                if (line) p.textContent = line;
+                else p.appendChild(document.createElement('br'));
+                el.appendChild(p);
+              });
+            };
+            const fire = (el, text) => {
+              try{ el.dispatchEvent(new InputEvent('beforeinput', {bubbles:true, composed:true, inputType:'insertText', data:text})); }catch{}
+              try{ el.dispatchEvent(new InputEvent('input', {bubbles:true, composed:true, inputType:'insertText', data:text})); }catch{}
+              try{ el.dispatchEvent(new Event('change', {bubbles:true})); }catch{}
+              try{ el.closest('form')?.dispatchEvent(new Event('input', {bubbles:true})); }catch{}
+            };
+
+            let el = null;
+            for (let i=0; i<80; i++){
+              el = findComposer();
+              if (el) break;
+              await sleep(100);
+            }
+            if (!el) return sendStatus({ok:false, step:'composer-not-found'});
+
+            selectAll(el);
+            await sleep(80);
+            let inserted = false;
+            if (el.tagName !== 'TEXTAREA'){
+              try{ document.execCommand('delete', false, null); }catch{}
+              try{ inserted = document.execCommand('insertText', false, prompt); }catch{}
+            }
+            if (!inserted) setDomFallback(el, prompt);
+            fire(el, prompt);
+            await sleep(250);
+
+            const ok = getText(el).includes(prompt.slice(0, 40));
+            sendStatus({ok, step:ok?'inserted':'not-in-dom', textLength:getText(el).length, tag:el.tagName, id:el.id || '', cls:el.className || ''});
+          })(${JSON.stringify(prompt)});
+        `;
+        document.documentElement.appendChild(script);
+        script.remove();
       });
-    }
-    async function setComposer(cmp,text){
-      cmp.el.focus();
-      cmp.el.click();
-      await wait(50);
-      if(cmp.type==='textarea'){
-        const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;
-        if(setter) setter.call(cmp.el,text); else cmp.el.value=text;
-        cmp.el.dispatchEvent(new InputEvent('beforeinput',{bubbles:true,composed:true,inputType:'insertText',data:text}));
-        cmp.el.dispatchEvent(new InputEvent('input',{bubbles:true,composed:true,data:text}));
-        cmp.el.dispatchEvent(new Event('change',{bubbles:true}));
-      }else{
-        selectEditable(cmp.el);
-        document.execCommand('delete',false,null);
-        let ok = false;
-        try{
-          ok = document.execCommand('insertText',false,text);
-        }catch{}
-        if(!ok){
-          setProseMirrorDOM(cmp.el,text);
-        }
-        cmp.el.dispatchEvent(new InputEvent('input',{bubbles:true,composed:true,inputType:'insertText',data:text}));
-        cmp.el.dispatchEvent(new Event('change',{bubbles:true}));
-      }
-      cmp.el.closest('form')?.dispatchEvent(new Event('input',{bubbles:true}));
-      await wait(80);
-      return composerText(cmp).includes(text.slice(0,40));
     }
     function clickSend(){
       const btns=[...document.querySelectorAll('button')].filter(b=>{
@@ -599,24 +625,24 @@ Consignes:
         chatStatus('Aucun prompt reçu depuis Amazon. Relance depuis le bouton Auto-avis.');
         return;
       }
-      chatStatus('Prompt reçu. Recherche du champ ChatGPT...');
+      chatStatus('Prompt reçu. Préparation de ChatGPT...');
 
       const newBtn=[...document.querySelectorAll('a,button')].find(b=>/(nouveau chat|new chat)/i.test(b.textContent||''));
       if(newBtn){ newBtn.click(); await wait(500); }
 
-      const cmp = await waitEl(()=>findComposer(), 60);
-      if(!cmp){ chatStatus('Champ ChatGPT introuvable. Utilise "Copier prompt", colle-le dans ChatGPT, puis envoie.'); return; }
-
-      chatStatus('Champ trouvé. Insertion du prompt...');
-      const inserted = await setComposer(cmp, prompt); await wait(700);
-      if(!inserted){
+      chatStatus('Insertion du prompt dans ChatGPT...');
+      const insertResult = await waitPageInsert(prompt);
+      if(!insertResult.ok){
         await copy(prompt);
         GM_setValue('vine_chat_active','');
-        chatStatus('Insertion automatique refusée. Prompt copié: colle-le dans ChatGPT avec Ctrl+V puis envoie.');
+        chatStatus(`Insertion échouée (${insertResult.step}). Prompt copié: colle-le avec Ctrl+V puis envoie.`);
         return;
       }
       chatStatus('Prompt inséré. Tentative d’envoi...');
-      if (!await waitSendAndClick()){ pressEnter(cmp); }
+      if (!await waitSendAndClick()){
+        const el = document.querySelector('div#prompt-textarea.ProseMirror[contenteditable="true"], #prompt-textarea[contenteditable="true"], textarea[name="prompt-textarea"]');
+        if(el) pressEnter({el});
+      }
       chatStatus('Prompt envoyé. Attente de la réponse JSON...');
 
       let done=false;
