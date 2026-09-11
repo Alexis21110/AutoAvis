@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Vine Auto Avis 2.0
 // @namespace    vine-auto-avis
-// @version      2.1
+// @version      2.2
 // @description  Genere un brouillon d'avis via ChatGPT et le colle dans le champ d'avis Amazon Vine. Ne coche jamais les etoiles, ne clique jamais sur Envoyer.
 // @match        https://www.amazon.fr/vine/vine-reviews*
 // @match        https://www.amazon.fr/review/create-review*
@@ -440,19 +440,42 @@
       textarea.parentNode.insertBefore(btn, textarea);
     }
 
-    if (!reviewText) return; // Page opened directly, not via our flow: nothing to do.
+    // Closes this tab once the user has clicked "Envoyer" themselves.
+    // This never triggers the submit itself, it only reacts to the user's own click.
+    function attachSubmitCloseListener() {
+      if (document.body.dataset.vineAutoAvisSubmitListenerAttached) return false;
+      const submitBtn = document.querySelector('.ryp-submit-button-desktop input[type="submit"]');
+      if (!submitBtn) return false;
 
-    // The review form is a React SPA that can render #reviewText well after
+      document.body.dataset.vineAutoAvisSubmitListenerAttached = '1';
+      submitBtn.addEventListener('click', () => {
+        LOG('Submit clicked by user, closing tab shortly...');
+        setTimeout(() => {
+          try {
+            window.close();
+          } catch (e) {
+            LOG('Could not auto-close tab after submit (browser restriction):', e);
+          }
+        }, 2500);
+      });
+      return true;
+    }
+
+    // The review form is a React SPA that can render its fields well after
     // document-idle. Poll for a while instead of trying only once.
     let attempts = 0;
     const maxAttempts = 40; // ~20s at 500ms
     const poller = setInterval(() => {
       attempts++;
       addManualButton();
+      attachSubmitCloseListener();
       const done = insertDraftIfReady();
-      if (done || attempts >= maxAttempts) {
+      if ((done || !reviewText) && attempts >= 4) {
         clearInterval(poller);
-        if (!done) LOG('Gave up polling for #reviewText after', attempts, 'attempts');
+      }
+      if (attempts >= maxAttempts) {
+        clearInterval(poller);
+        if (reviewText && !done) LOG('Gave up polling for #reviewText after', attempts, 'attempts');
       }
     }, 500);
   }
