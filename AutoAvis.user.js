@@ -1,17 +1,12 @@
 // ==UserScript==
 // @name         Vine Auto Avis 2.0
 // @namespace    vine-auto-avis
-// @version      1.1
+// @version      2.1
 // @description  Genere un brouillon d'avis via ChatGPT et le colle dans le champ d'avis Amazon Vine. Ne coche jamais les etoiles, ne clique jamais sur Envoyer.
 // @match        https://www.amazon.fr/vine/vine-reviews*
 // @match        https://www.amazon.fr/review/create-review*
 // @match        https://chatgpt.com/*
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_deleteValue
 // @grant        GM_openInTab
-// @grant        GM_addValueChangeListener
-// @grant        GM_notification
 // @grant        GM_addStyle
 // @run-at       document-idle
 // @updateURL    https://github.com/Alexis21110/AutoAvis/raw/refs/heads/main/AutoAvis.user.js
@@ -20,6 +15,18 @@
 
 (function () {
   'use strict';
+
+  // Data is passed between pages entirely via URL query params instead of
+  // GM_setValue/GM_getValue: cross-domain shared storage between Tampermonkey
+  // and GM_addValueChangeListener are not reliably supported on every
+  // userscript engine (notably Safari on iOS), so the URL is the one channel
+  // guaranteed to work everywhere.
+  const PARAM_PROMPT = 'vinePrompt';
+  const PARAM_ASIN = 'vineAsin';
+  const PARAM_PRODUCT_TITLE = 'vineProductTitle';
+  const PARAM_REVIEW_URL = 'vineReviewUrl';
+  const PARAM_REVIEW_TITLE = 'vineReviewTitle';
+  const PARAM_REVIEW_TEXT = 'vineReviewText';
 
   const LOG = (...args) => console.log('[VineAutoAvis]', ...args);
 
@@ -82,10 +89,6 @@
       }
     `;
     document.head.appendChild(style);
-  }
-
-  function draftKey(asin) {
-    return `vine_draft_${asin}`;
   }
 
   function buildPrompt(title) {
@@ -178,7 +181,7 @@
       if (!asin) return;
 
       const btn = document.createElement('button');
-      btn.textContent = '✨ Auto avis (brouillon)';
+      btn.textContent = '✨ Auto avis';
       btn.type = 'button';
       btn.className = 'vine-auto-avis-btn';
 
@@ -188,24 +191,24 @@
 
         const title = guessTitle(link);
         const reviewUrl = new URL(link.href, location.origin).href;
+        const prompt = buildPrompt(title);
 
         LOG('Starting draft flow for', asin, title);
 
-        GM_setValue(draftKey(asin), {
-          asin,
-          title,
-          reviewUrl,
-          prompt: buildPrompt(title),
-          status: 'pending',
-          text: '',
-          ts: Date.now(),
-        });
-        GM_setValue('vine_active_asin', asin);
+        const chatUrl = new URL('https://chatgpt.com/');
+        chatUrl.searchParams.set(PARAM_PROMPT, prompt);
+        chatUrl.searchParams.set(PARAM_ASIN, asin);
+        chatUrl.searchParams.set(PARAM_PRODUCT_TITLE, title);
+        chatUrl.searchParams.set(PARAM_REVIEW_URL, reviewUrl);
 
         btn.textContent = '⏳ Génération en cours…';
         btn.disabled = true;
+        setTimeout(() => {
+          btn.textContent = '✨ Auto avis';
+          btn.disabled = false;
+        }, 4000);
 
-        GM_openInTab('https://chatgpt.com/', { active: true, insert: true });
+        GM_openInTab(chatUrl.href, { active: true, insert: true });
       });
 
       // Insert outside the Amazon .a-button widget (which clips extra children),
@@ -224,20 +227,19 @@
     scan();
     const observer = new MutationObserver(() => scan());
     observer.observe(document.body, { childList: true, subtree: true });
-
-    // Feedback when a draft becomes ready (in case user stays on this tab).
-    GM_addValueChangeListener('vine_active_asin', () => {}); // keep listener alive if needed later
   }
 
   // ---------------------------------------------------------------------
   // PART B: https://chatgpt.com/
   // ---------------------------------------------------------------------
   function initChatGptPage() {
-    const asin = GM_getValue('vine_active_asin', null);
-    if (!asin) return;
+    const params = new URL(location.href).searchParams;
+    const prompt = params.get(PARAM_PROMPT);
+    const asin = params.get(PARAM_ASIN);
+    const productTitle = params.get(PARAM_PRODUCT_TITLE) || '';
+    const reviewUrl = params.get(PARAM_REVIEW_URL);
 
-    const draft = GM_getValue(draftKey(asin), null);
-    if (!draft || draft.status !== 'pending') return;
+    if (!prompt || !asin || !reviewUrl) return; // Not our flow, do nothing.
 
     LOG('ChatGPT page: sending prompt for', asin);
 
@@ -312,7 +314,7 @@
         box.focus();
 
         // ProseMirror contenteditable: set text via execCommand/insertText for compatibility.
-        document.execCommand('insertText', false, draft.prompt);
+        document.execCommand('insertText', false, prompt);
         box.dispatchEvent(new Event('input', { bubbles: true }));
 
         await new Promise((r) => setTimeout(r, 400));
@@ -320,7 +322,6 @@
         const sendBtn = await waitFor(getSendButton, 8000);
         sendBtn.click();
 
-        GM_setValue(draftKey(asin), { ...draft, status: 'awaiting_response' });
         LOG('Prompt sent, waiting for response...');
 
         // Wait for streaming to start then finish.
@@ -346,21 +347,16 @@
 
         LOG('Response captured, length', lastText.length);
 
-        const { reviewTitle, reviewText } = parseGeneratedReview(lastText, draft.title);
+        const { reviewTitle, reviewText } = parseGeneratedReview(lastText, productTitle);
 
-        const updated = { ...draft, status: 'ready', text: reviewText, reviewTitle };
-        GM_setValue(draftKey(asin), updated);
-        GM_deleteValue('vine_active_asin');
+        const targetUrl = new URL(reviewUrl);
+        targetUrl.searchParams.set(PARAM_REVIEW_TITLE, reviewTitle);
+        targetUrl.searchParams.set(PARAM_REVIEW_TEXT, reviewText);
 
-        GM_notification({
-          title: 'Brouillon Vine pret',
-          text: `Brouillon genere pour "${draft.title}". Ouverture de la page d'avis...`,
-          timeout: 4000,
-        });
-
-        GM_openInTab(draft.reviewUrl, { active: true, insert: true });
+        GM_openInTab(targetUrl.href, { active: true, insert: true });
 
         // Close this ChatGPT tab now that the result has been captured.
+        // Only works on tabs without further navigation history (browser restriction).
         setTimeout(() => {
           try {
             window.close();
@@ -370,7 +366,6 @@
         }, 500);
       } catch (err) {
         LOG('Error in ChatGPT flow:', err);
-        GM_setValue(draftKey(asin), { ...draft, status: 'error', error: String(err) });
       }
     }
 
@@ -382,21 +377,12 @@
   // ---------------------------------------------------------------------
   function initCreateReviewPage() {
     injectStyles();
-    const url = new URL(location.href);
-    const asin = url.searchParams.get('asin');
-    if (!asin) {
-      LOG('No asin in create-review URL, skipping');
-      return;
-    }
+    const params = new URL(location.href).searchParams;
+    const reviewTitle = params.get(PARAM_REVIEW_TITLE);
+    const reviewText = params.get(PARAM_REVIEW_TEXT);
 
     function insertDraftIfReady() {
-      const draft = GM_getValue(draftKey(asin), null);
-      if (!draft) return false;
-      if (draft.status === 'error') {
-        LOG('Draft generation failed:', draft.error);
-        return false;
-      }
-      if (draft.status !== 'ready' || !draft.text) return false;
+      if (!reviewText) return false;
 
       const textarea = document.querySelector('#reviewText');
       if (!textarea) return false;
@@ -412,7 +398,7 @@
         window.HTMLTextAreaElement.prototype,
         'value'
       ).set;
-      nativeTextareaSetter.call(textarea, draft.text);
+      nativeTextareaSetter.call(textarea, reviewText);
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       textarea.dispatchEvent(new Event('change', { bubbles: true }));
       textarea.focus();
@@ -420,17 +406,17 @@
       textarea.focus();
 
       const titleInput = document.querySelector('#reviewTitle');
-      if (titleInput && !titleInput.value.trim() && draft.reviewTitle) {
+      if (titleInput && !titleInput.value.trim() && reviewTitle) {
         const nativeInputSetter = Object.getOwnPropertyDescriptor(
           window.HTMLInputElement.prototype,
           'value'
         ).set;
-        nativeInputSetter.call(titleInput, draft.reviewTitle);
+        nativeInputSetter.call(titleInput, reviewTitle);
         titleInput.dispatchEvent(new Event('input', { bubbles: true }));
         titleInput.dispatchEvent(new Event('change', { bubbles: true }));
       }
 
-      LOG('Draft inserted into #reviewText/#reviewTitle for asin', asin);
+      LOG('Draft inserted into #reviewText/#reviewTitle');
       return true;
     }
 
@@ -447,12 +433,14 @@
       btn.addEventListener('click', () => {
         const inserted = insertDraftIfReady();
         if (!inserted) {
-          alert('Aucun brouillon pret pour ce produit. Lancez "Auto avis" depuis la page Vine reviews.');
+          alert('Aucun brouillon disponible dans cette page. Lancez "Auto avis" depuis la page Vine reviews.');
         }
       });
 
       textarea.parentNode.insertBefore(btn, textarea);
     }
+
+    if (!reviewText) return; // Page opened directly, not via our flow: nothing to do.
 
     // The review form is a React SPA that can render #reviewText well after
     // document-idle. Poll for a while instead of trying only once.
@@ -464,16 +452,9 @@
       const done = insertDraftIfReady();
       if (done || attempts >= maxAttempts) {
         clearInterval(poller);
-        if (!done) LOG('Gave up polling for #reviewText / ready draft after', attempts, 'attempts');
+        if (!done) LOG('Gave up polling for #reviewText after', attempts, 'attempts');
       }
     }, 500);
-
-    // Also react immediately if the draft flips to 'ready' while we're on this page.
-    GM_addValueChangeListener(draftKey(asin), (name, oldVal, newVal) => {
-      if (newVal && newVal.status === 'ready') {
-        insertDraftIfReady();
-      }
-    });
   }
 
   // ---------------------------------------------------------------------
