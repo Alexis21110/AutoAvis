@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Vine Auto Avis (brouillon IA - relecture obligatoire)
+// @name         Vine Auto Avis 2.0
 // @namespace    vine-auto-avis
-// @version      1.0
+// @version      1.1
 // @description  Genere un brouillon d'avis via ChatGPT et le colle dans le champ d'avis Amazon Vine. Ne coche jamais les etoiles, ne clique jamais sur Envoyer.
 // @match        https://www.amazon.fr/vine/vine-reviews*
 // @match        https://www.amazon.fr/review/create-review*
@@ -12,13 +12,77 @@
 // @grant        GM_openInTab
 // @grant        GM_addValueChangeListener
 // @grant        GM_notification
+// @grant        GM_addStyle
 // @run-at       document-idle
+// @updateURL    https://github.com/Alexis21110/AutoAvis/raw/refs/heads/main/AutoAvis.user.js
+// @downloadURL  https://github.com/Alexis21110/AutoAvis/raw/refs/heads/main/AutoAvis.user.js
 // ==/UserScript==
 
 (function () {
   'use strict';
 
   const LOG = (...args) => console.log('[VineAutoAvis]', ...args);
+
+  function injectStyles() {
+    if (document.getElementById('vine-auto-avis-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'vine-auto-avis-styles';
+    style.textContent = `
+      .vine-auto-avis-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 8px;
+        padding: 8px 14px;
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 1.2;
+        color: #fff;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        border: none;
+        border-radius: 20px;
+        box-shadow: 0 2px 6px rgba(99, 102, 241, 0.35);
+        cursor: pointer;
+        transition: transform 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease;
+        white-space: nowrap;
+      }
+      .vine-auto-avis-btn:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 10px rgba(99, 102, 241, 0.45);
+      }
+      .vine-auto-avis-btn:active:not(:disabled) {
+        transform: translateY(0);
+        box-shadow: 0 1px 3px rgba(99, 102, 241, 0.4);
+      }
+      .vine-auto-avis-btn:disabled {
+        opacity: 0.6;
+        cursor: default;
+        transform: none;
+      }
+      .vine-auto-avis-btn.vine-auto-avis-btn--secondary {
+        background: #fff;
+        color: #6366f1;
+        border: 1.5px solid #6366f1;
+        box-shadow: none;
+      }
+      .vine-auto-avis-btn.vine-auto-avis-btn--secondary:hover:not(:disabled) {
+        background: #f5f3ff;
+        box-shadow: 0 2px 6px rgba(99, 102, 241, 0.2);
+      }
+      @media (max-width: 600px) {
+        .vine-auto-avis-btn {
+          display: flex;
+          width: 100%;
+          justify-content: center;
+          margin-top: 10px;
+          padding: 12px 14px;
+          font-size: 14px;
+          border-radius: 12px;
+        }
+      }
+    `;
+    document.head.appendChild(style);
+  }
 
   function draftKey(asin) {
     return `vine_draft_${asin}`;
@@ -30,11 +94,40 @@
       `Titre du produit : "${title}"`,
       ``,
       `Contraintes :`,
-      `- 80 a 150 mots, ton naturel et credible.`,
+      `- Le corps de l'avis fait 80 a 150 mots, ton naturel et credible.`,
       `- Mentionne au moins un point positif et un point negatif ou nuance plausibles.`,
       `- Pas de note chiffree, pas d'etoiles, pas de mention d'IA ou de programme Vine.`,
-      `- Juste le texte de l'avis, sans titre ni guillemets.`,
+      `- Reponds immediatement et directement, sans reflexion longue ni raisonnement etendu : va droit au but, pas de plan ni de brouillon intermediaire.`,
+      ``,
+      `Reponds EXACTEMENT dans ce format, sans rien ajouter avant ou apres :`,
+      `TITRE: <titre court de l'avis, 5 a 8 mots, sans guillemets>`,
+      `AVIS: <texte du corps de l'avis>`,
     ].join('\n');
+  }
+
+  // Parses the "TITRE: ... / AVIS: ..." format requested in the prompt.
+  // Falls back gracefully if the model didn't follow the format exactly.
+  function stripLeadingLabel(text) {
+    return text.replace(/^\s*avis\s+client\s*:?\s*/i, '').trim();
+  }
+
+  function parseGeneratedReview(rawTextInput, productTitle) {
+    const rawText = stripLeadingLabel(rawTextInput);
+    const avisIdx = rawText.search(/AVIS\s*:/i);
+    const titreIdx = rawText.search(/TITRE\s*:/i);
+
+    if (avisIdx === -1) {
+      return { reviewTitle: (productTitle || '').slice(0, 60), reviewText: stripLeadingLabel(rawText) };
+    }
+
+    const body = stripLeadingLabel(rawText.slice(avisIdx).replace(/^AVIS\s*:/i, ''));
+    let title = '';
+    if (titreIdx !== -1 && titreIdx < avisIdx) {
+      title = rawText.slice(titreIdx, avisIdx).replace(/^TITRE\s*:/i, '').trim();
+    }
+    if (!title) title = (productTitle || '').slice(0, 60);
+
+    return { reviewTitle: title, reviewText: body };
   }
 
   // ---------------------------------------------------------------------
@@ -42,8 +135,13 @@
   // ---------------------------------------------------------------------
   function initVineReviewsPage() {
     LOG('Vine reviews page detected');
+    injectStyles();
 
     function findReviewLinks() {
+      const byName = Array.from(
+        document.querySelectorAll('a[name="vvp-reviews-table--review-item-btn"]')
+      );
+      if (byName.length) return byName;
       return Array.from(document.querySelectorAll('a[href*="/review/create-review"]'));
     }
 
@@ -57,19 +155,16 @@
     }
 
     function guessTitle(link) {
-      // Try a few common ancestor patterns for the product title near the review link.
-      const container =
-        link.closest('[class*="item"], [class*="product"], li, tr, div[role="listitem"]') ||
-        link.closest('div');
-      if (container) {
-        const img = container.querySelector('img[alt]');
+      const row = link.closest('tr.vvp-reviews-table--row') || link.closest('tr');
+      if (row) {
+        const full = row.querySelector('.a-truncate-full.a-offscreen');
+        if (full && full.textContent.trim().length > 3) return full.textContent.trim();
+
+        const anchor = row.querySelector('#vvp-reviews-product-detail-page-link');
+        if (anchor && anchor.textContent.trim().length > 3) return anchor.textContent.trim();
+
+        const img = row.querySelector('img[alt]');
         if (img && img.alt && img.alt.trim().length > 3) return img.alt.trim();
-
-        const heading = container.querySelector('h1, h2, h3, [class*="title"]');
-        if (heading && heading.textContent.trim().length > 3) return heading.textContent.trim();
-
-        const anyLink = container.querySelector('a[title]');
-        if (anyLink && anyLink.title) return anyLink.title.trim();
       }
       // Fallback: use the link's own accessible text/title.
       return (link.title || link.textContent || 'Produit inconnu').trim();
@@ -83,15 +178,9 @@
       if (!asin) return;
 
       const btn = document.createElement('button');
-      btn.textContent = '🤖 Auto avis (brouillon)';
+      btn.textContent = '✨ Auto avis (brouillon)';
       btn.type = 'button';
-      btn.style.marginLeft = '8px';
-      btn.style.padding = '4px 8px';
-      btn.style.fontSize = '12px';
-      btn.style.cursor = 'pointer';
-      btn.style.border = '1px solid #888';
-      btn.style.borderRadius = '4px';
-      btn.style.background = '#fff';
+      btn.className = 'vine-auto-avis-btn';
 
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -113,13 +202,19 @@
         });
         GM_setValue('vine_active_asin', asin);
 
-        btn.textContent = '⏳ Generation en cours...';
+        btn.textContent = '⏳ Génération en cours…';
         btn.disabled = true;
 
         GM_openInTab('https://chatgpt.com/', { active: true, insert: true });
       });
 
-      link.insertAdjacentElement('afterend', btn);
+      // Insert outside the Amazon .a-button widget (which clips extra children),
+      // directly in the actions cell so the button is actually visible.
+      const actionsCell =
+        link.closest('td.vvp-reviews-table--actions-col') ||
+        link.closest('.a-button')?.parentElement ||
+        link.parentElement;
+      actionsCell.appendChild(btn);
     }
 
     function scan() {
@@ -176,8 +271,43 @@
       return nodes.length ? nodes[nodes.length - 1] : null;
     }
 
+    // Best-effort: if a model switcher is present, try to pick the fast/instant
+    // variant (as opposed to a "Thinking"/"Reasoning" mode) so generation is quicker.
+    // Silently does nothing if the UI doesn't match (menu labels change often).
+    async function trySelectFastModel() {
+      try {
+        const switcherBtn = document.querySelector(
+          'button[data-testid="model-switcher-dropdown-button"], button[aria-label*="modele" i], button[aria-label*="model" i]'
+        );
+        if (!switcherBtn) return;
+
+        switcherBtn.click();
+        await new Promise((r) => setTimeout(r, 400));
+
+        const options = Array.from(document.querySelectorAll('[role="menuitem"], [role="option"]'));
+        const fastOption = options.find((el) => {
+          const t = el.textContent.toLowerCase();
+          return (t.includes('instant') || t.includes('rapide') || t.includes('flash')) &&
+            !t.includes('thinking') && !t.includes('reflex') && !t.includes('raisonnement');
+        });
+
+        if (fastOption) {
+          fastOption.click();
+          LOG('Fast model option selected:', fastOption.textContent.trim());
+        } else {
+          // Close the menu if we opened it but found nothing usable.
+          document.body.click();
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      } catch (e) {
+        LOG('trySelectFastModel failed (non-blocking):', e);
+      }
+    }
+
     async function run() {
       try {
+        await trySelectFastModel();
+
         const box = await waitFor(getPromptBox);
         box.focus();
 
@@ -216,7 +346,9 @@
 
         LOG('Response captured, length', lastText.length);
 
-        const updated = { ...draft, status: 'ready', text: lastText };
+        const { reviewTitle, reviewText } = parseGeneratedReview(lastText, draft.title);
+
+        const updated = { ...draft, status: 'ready', text: reviewText, reviewTitle };
         GM_setValue(draftKey(asin), updated);
         GM_deleteValue('vine_active_asin');
 
@@ -227,6 +359,15 @@
         });
 
         GM_openInTab(draft.reviewUrl, { active: true, insert: true });
+
+        // Close this ChatGPT tab now that the result has been captured.
+        setTimeout(() => {
+          try {
+            window.close();
+          } catch (e) {
+            LOG('Could not auto-close ChatGPT tab (browser restriction):', e);
+          }
+        }, 500);
       } catch (err) {
         LOG('Error in ChatGPT flow:', err);
         GM_setValue(draftKey(asin), { ...draft, status: 'error', error: String(err) });
@@ -240,6 +381,7 @@
   // PART C: https://www.amazon.fr/review/create-review
   // ---------------------------------------------------------------------
   function initCreateReviewPage() {
+    injectStyles();
     const url = new URL(location.href);
     const asin = url.searchParams.get('asin');
     if (!asin) {
@@ -263,37 +405,33 @@
         return true;
       }
 
-      textarea.value = draft.text;
+      // This form is a React app: setting .value directly is ignored because
+      // React wraps the native setter. Call the native setter explicitly so
+      // React's change detection (which compares against it) still fires.
+      const nativeTextareaSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value'
+      ).set;
+      nativeTextareaSetter.call(textarea, draft.text);
       textarea.dispatchEvent(new Event('input', { bubbles: true }));
       textarea.dispatchEvent(new Event('change', { bubbles: true }));
       textarea.focus();
+      textarea.blur();
+      textarea.focus();
 
-      showBanner();
-      LOG('Draft inserted into #reviewText for asin', asin);
-      return true;
-    }
-
-    function showBanner() {
-      if (document.getElementById('vine-auto-avis-banner')) return;
-      const banner = document.createElement('div');
-      banner.id = 'vine-auto-avis-banner';
-      banner.textContent =
-        '⚠️ Brouillon genere par IA inseré ci-dessous. Relisez, corrigez selon votre experience reelle, et choisissez vous-meme la note en etoiles avant d\'envoyer.';
-      banner.style.background = '#fff3cd';
-      banner.style.border = '1px solid #ffc107';
-      banner.style.color = '#664d03';
-      banner.style.padding = '10px 14px';
-      banner.style.margin = '10px 0';
-      banner.style.borderRadius = '6px';
-      banner.style.fontSize = '13px';
-      banner.style.fontWeight = 'bold';
-
-      const textarea = document.querySelector('#reviewText');
-      if (textarea && textarea.parentNode) {
-        textarea.parentNode.insertBefore(banner, textarea);
-      } else {
-        document.body.insertBefore(banner, document.body.firstChild);
+      const titleInput = document.querySelector('#reviewTitle');
+      if (titleInput && !titleInput.value.trim() && draft.reviewTitle) {
+        const nativeInputSetter = Object.getOwnPropertyDescriptor(
+          window.HTMLInputElement.prototype,
+          'value'
+        ).set;
+        nativeInputSetter.call(titleInput, draft.reviewTitle);
+        titleInput.dispatchEvent(new Event('input', { bubbles: true }));
+        titleInput.dispatchEvent(new Event('change', { bubbles: true }));
       }
+
+      LOG('Draft inserted into #reviewText/#reviewTitle for asin', asin);
+      return true;
     }
 
     function addManualButton() {
@@ -304,10 +442,7 @@
       btn.id = 'vine-auto-avis-manual-btn';
       btn.type = 'button';
       btn.textContent = '📋 Coller le brouillon IA';
-      btn.style.margin = '6px 0';
-      btn.style.padding = '4px 8px';
-      btn.style.fontSize = '12px';
-      btn.style.cursor = 'pointer';
+      btn.className = 'vine-auto-avis-btn vine-auto-avis-btn--secondary';
 
       btn.addEventListener('click', () => {
         const inserted = insertDraftIfReady();
@@ -319,16 +454,26 @@
       textarea.parentNode.insertBefore(btn, textarea);
     }
 
-    // Try immediately, then react to draft becoming ready if we arrived early.
-    if (!insertDraftIfReady()) {
-      GM_addValueChangeListener(draftKey(asin), (name, oldVal, newVal) => {
-        if (newVal && newVal.status === 'ready') {
-          insertDraftIfReady();
-        }
-      });
-    }
+    // The review form is a React SPA that can render #reviewText well after
+    // document-idle. Poll for a while instead of trying only once.
+    let attempts = 0;
+    const maxAttempts = 40; // ~20s at 500ms
+    const poller = setInterval(() => {
+      attempts++;
+      addManualButton();
+      const done = insertDraftIfReady();
+      if (done || attempts >= maxAttempts) {
+        clearInterval(poller);
+        if (!done) LOG('Gave up polling for #reviewText / ready draft after', attempts, 'attempts');
+      }
+    }, 500);
 
-    addManualButton();
+    // Also react immediately if the draft flips to 'ready' while we're on this page.
+    GM_addValueChangeListener(draftKey(asin), (name, oldVal, newVal) => {
+      if (newVal && newVal.status === 'ready') {
+        insertDraftIfReady();
+      }
+    });
   }
 
   // ---------------------------------------------------------------------
