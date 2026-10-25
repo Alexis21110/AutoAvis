@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.5
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.6
 // @namespace    https://vine-local/
-// @version      8.3.5
+// @version      8.3.6
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -550,7 +550,9 @@ Consignes:
           const el = [...document.querySelectorAll(s)].find(visible);
           if (el) return el;
         }
-        return null;
+        // fallback : la seule zone de saisie de la page, même si le navigateur la juge non visible (onglet caché)
+        const only = [...document.querySelectorAll('textarea, [contenteditable="true"]')];
+        return only.length === 1 ? only[0] : null;
       };
       const getText = el => el.tagName === 'TEXTAREA' ? (el.value || '') : (el.innerText || el.textContent || '');
       const placeCaretInEditable = el => {
