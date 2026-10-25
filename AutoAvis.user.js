@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.3
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.4
 // @namespace    https://vine-local/
-// @version      8.3.3
+// @version      8.3.4
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -162,7 +162,7 @@ Tu es un testeur Amazon Vine. Rédige un avis honnête en français pour: "${pro
 Consignes:
 - Réponds UNIQUEMENT par un objet JSON valide avec exactement deux clés:
   "title": string (≤110 caractères), percutant et informatif.
-  "body" : string (5–7 phrases; usage réel, 2–3 points forts, 1–2 limites/points à savoir, conclusion claire).
+  "body" : string (3–4 phrases; usage réel, 1–2 points forts, 1 limite, conclusion claire).
 - Important: adapte le ton au niveau de satisfaction (${stars}★) → ${tone}.
 - Interdiction: ne mentionne aucune note chiffrée ("x/5", "cinq étoiles", etc.) dans le texte.
 
@@ -319,7 +319,7 @@ Tu es un testeur Amazon Vine. Rédige un avis honnête en français pour: "${pro
 Consignes:
 - Réponds UNIQUEMENT par un objet JSON valide avec exactement deux clés:
   "title": string (≤110 caractères), percutant et informatif.
-  "body" : string (5–7 phrases; usage réel, 2–3 points forts, 1–2 limites/points à savoir, conclusion claire).
+  "body" : string (3–4 phrases; usage réel, 1–2 points forts, 1 limite, conclusion claire).
 - Important: adapte le ton au niveau de satisfaction (${n}★) → ${tone}.
 - Interdiction: ne mentionne aucune note chiffrée ("x/5", "cinq étoiles", etc.) dans le texte.
 
