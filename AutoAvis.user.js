@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.4
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.5
 // @namespace    https://vine-local/
-// @version      8.3.4
+// @version      8.3.5
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -613,7 +613,7 @@ Consignes:
 
       el.focus();
       el.click();
-      await wait(120);
+      await wait(50);
 
       let inserted = false;
       if(el.tagName === 'TEXTAREA'){
@@ -692,7 +692,7 @@ Consignes:
         return;
       }
       chatStatus('Prompt reçu. Attente du chargement complet de ChatGPT...');
-      await wait(3500);
+      await wait(1000); // le composer est de toute façon attendu plus bas
 
       chatStatus('Insertion du prompt dans ChatGPT...');
       const insertResult = await insertPromptDirect(prompt);
