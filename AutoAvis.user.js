@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.10
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.11
 // @namespace    https://vine-local/
-// @version      8.3.10
+// @version      8.3.11
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -338,7 +338,7 @@ Consignes:
         GM_setValue('vine_result',''); GM_setValue('vine_raw','');
         GM_setValue('vine_owner', MY_TOKEN);
         GM_setValue('vine_context', JSON.stringify({ productTitle, asin, stars:n }));
-        progress.show('Ouverture de ChatGPT…');
+        progress.show('Ouvre l’onglet ChatGPT, attends la réponse, puis reviens sur Amazon.');
         openChat(); // ChatGPT en arrière-plan (sera fermé plus tard)
       };
     })();
@@ -497,7 +497,7 @@ Consignes:
       if (from){
         GM_setValue('vine_from_list','');
         GM_setValue('vine_owner', MY_TOKEN);
-        progress.show('Ouverture de ChatGPT…');
+        progress.show('Ouvre l’onglet ChatGPT, attends la réponse, puis reviens sur Amazon.');
         await clickStarsSafe();
         // ouvre ChatGPT (focus) ; il sera fermé quand la réponse arrivera
         try{ if(window.__vineChatTab && !window.__vineChatTab.closed){ window.__vineChatTab.close(); } }catch{}
