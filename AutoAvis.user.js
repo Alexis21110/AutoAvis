@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.6
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.7
 // @namespace    https://vine-local/
-// @version      8.3.6
+// @version      8.3.7
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -728,12 +728,18 @@ Consignes:
       });
       obs.observe(document.body,{childList:true,subtree:true});
       const timer=setInterval(check,1500);
+      // un onglet caché est suspendu (iOS, Chrome) : on relit la page dès qu'il redevient visible
+      const onVisible=()=>{ if(!document.hidden) check(); };
+      document.addEventListener('visibilitychange', onVisible);
+      window.addEventListener('focus', onVisible);
       // diagnostic : indique toutes les 15 s combien de blocs ont été lus
       const ticker=setInterval(()=>{ if(!done) chatStatus(`Attente de la réponse JSON… (${getCandidates().length} bloc(s) lu(s))`); },15000);
       setTimeout(()=>{
         obs.disconnect();
         clearInterval(timer);
         clearInterval(ticker);
+        document.removeEventListener('visibilitychange', onVisible);
+        window.removeEventListener('focus', onVisible);
         check();
         if(!done){
           GM_setValue('vine_chat_active','');
