@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.2.1
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.0
 // @namespace    https://vine-local/
-// @version      8.2.1
+// @version      8.3.0
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -329,7 +329,8 @@ Consignes:
         GM_setValue('vine_result',''); GM_setValue('vine_raw','');
         GM_setValue('vine_owner', MY_TOKEN);
         GM_setValue('vine_context', JSON.stringify({ productTitle, asin, stars:n }));
-        openChat(); // focus ChatGPT (sera fermé plus tard)
+        progress.show('Ouverture de ChatGPT…');
+        openChat(); // ChatGPT en arrière-plan (sera fermé plus tard)
       };
     })();
 
@@ -399,7 +400,38 @@ Consignes:
       t.textContent = msg;
     }
 
+    // barre de progression : suit l'étape côté ChatGPT et alerte si ça ne bouge plus
+    const progress = {
+      el: null,
+      last: 0,
+      show(msg){
+        if (!this.el){
+          this.el = document.createElement('div');
+          this.el.id = 'vine-progress';
+          this.el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#111;color:#fff;padding:8px 14px;font:13px system-ui;display:none;box-shadow:0 4px 16px rgba(0,0,0,.3)';
+          this.el.innerHTML = `
+            <div id="vp-msg" style="margin-bottom:6px"></div>
+            <div style="height:6px;background:#333;border-radius:3px;overflow:hidden">
+              <div style="height:100%;width:30%;background:#ffd814;border-radius:3px;animation:vp-move 1.2s linear infinite"></div>
+            </div>
+            <style>@keyframes vp-move{0%{margin-left:-30%}100%{margin-left:100%}}</style>
+          `;
+          document.documentElement.appendChild(this.el);
+        }
+        this.el.style.display = 'block';
+        this.el.querySelector('#vp-msg').textContent = msg;
+        this.last = Date.now();
+      },
+      hide(){ if (this.el) this.el.style.display = 'none'; }
+    };
+    setInterval(()=>{
+      if (progress.el && progress.el.style.display === 'block' && Date.now() - progress.last > 90000){
+        progress.el.querySelector('#vp-msg').textContent = 'Pas de nouvelles de ChatGPT depuis 90 s. Vérifie l’onglet ChatGPT (panneau « Vine Auto-avis »).';
+      }
+    }, 5000);
+
     async function fillFromResult(raw){
+      progress.hide();
       GM_setValue('vine_result','');
       const parsed = parseJSONStrict(raw);
       const ctx    = JSON.parse(GM_getValue('vine_context','{}')||'{}');
@@ -438,6 +470,9 @@ Consignes:
       GM_addValueChangeListener('vine_result', (_n,_o,val,remote)=>{
         if(remote && val && GM_getValue('vine_owner','')===MY_TOKEN){ fillFromResult(val); }
       });
+      GM_addValueChangeListener('vine_progress', (_n,_o,val,remote)=>{
+        if(remote && val && GM_getValue('vine_owner','')===MY_TOKEN){ progress.show(JSON.parse(val).msg); }
+      });
     }catch{}
 
     (async function boot(){
@@ -445,6 +480,7 @@ Consignes:
       if (from){
         GM_setValue('vine_from_list','');
         GM_setValue('vine_owner', MY_TOKEN);
+        progress.show('Ouverture de ChatGPT…');
         await clickStarsSafe();
         // ouvre ChatGPT (focus) ; il sera fermé quand la réponse arrivera
         try{ if(window.__vineChatTab && !window.__vineChatTab.closed){ window.__vineChatTab.close(); } }catch{}
@@ -488,6 +524,7 @@ Consignes:
         box.querySelector('#vcs-hide').onclick = ()=> box.remove();
       }
       box.querySelector('#vcs-msg').textContent = msg;
+      GM_setValue('vine_progress', JSON.stringify({msg}));
     }
 
     async function insertPromptDirect(prompt){
