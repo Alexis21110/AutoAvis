@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.8
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.9
 // @namespace    https://vine-local/
-// @version      8.3.8
+// @version      8.3.9
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -29,7 +29,14 @@
   const isVineList = location.pathname.startsWith('/vine/vine-reviews');
   const isCreate   = location.pathname.startsWith('/review/create-review');
   const isChatGPT  = location.host.includes('chatgpt.com') || location.host.includes('chat.openai.com');
-  const MY_TOKEN   = Math.random().toString(36).slice(2) + Date.now().toString(36); // identifie cet onglet Amazon
+  // identifie cet onglet Amazon ; gardé en sessionStorage pour survivre à un rechargement de la page (iOS)
+  const MY_TOKEN   = (()=>{
+    try{
+      let t = sessionStorage.getItem('vineToken');
+      if (!t){ t = Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem('vineToken', t); }
+      return t;
+    }catch{ return Math.random().toString(36).slice(2); }
+  })();
 
   const wait = (ms)=>new Promise(r=>setTimeout(r,ms));
   const visible = el => {
