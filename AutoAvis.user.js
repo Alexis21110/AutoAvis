@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.1
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.2
 // @namespace    https://vine-local/
-// @version      8.3.1
+// @version      8.3.2
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -666,13 +666,18 @@ Consignes:
     function getCandidates(){
       const arr=[]; const add=(s)=>{ if(s && s.includes('{') && s.includes('}')) arr.push(s.trim()); };
       document.querySelectorAll('pre, code, [data-message-author-role="assistant"], .markdown, article').forEach(n=>add(n.innerText||n.textContent||''));
+      add(document.querySelector('main')?.innerText||''); // réponse en texte brut, sans balise
       return arr.reverse();
     }
     function findGood(){
       const cands=getCandidates();
       for(const t of cands){
-        const o=parseJSONStrict(t); // mêmes règles que côté Amazon
-        if(o) return {obj:o, raw:t};
+        // chaque bloc {…} du texte ; le plus récent d'abord ; même règles que côté Amazon
+        const blocks=(t.match(/\{[^{}]*\}/g)||[]).reverse();
+        for(const b of blocks){
+          const o=parseJSONStrict(b);
+          if(o) return {obj:o, raw:b};
+        }
       }
       return null;
     }
