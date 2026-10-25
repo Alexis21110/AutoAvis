@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.9
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.10
 // @namespace    https://vine-local/
-// @version      8.3.9
+// @version      8.3.10
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -722,7 +722,7 @@ Consignes:
           if(el) pressEnter({el});
         }
         GM_setValue('vine_sent', prompt);
-        chatStatus('Prompt envoyé. Attente de la réponse JSON...');
+        chatStatus('Prompt envoyé. Reste sur cet onglet jusqu’à la réponse, puis reviens sur Amazon (iPhone).');
       }
 
       let done=false;
