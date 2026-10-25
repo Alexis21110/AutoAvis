@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.7
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.8
 // @namespace    https://vine-local/
-// @version      8.3.7
+// @version      8.3.8
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -222,6 +222,7 @@ Consignes:
         const stars = pickStars();
         GM_setValue('vine_stars', String(stars));
         GM_setValue('vine_prompt', buildPrompt(productTitle, stars));
+        GM_setValue('vine_sent','');
         GM_setValue('vine_result',''); GM_setValue('vine_raw','');
         GM_setValue('vine_from_list','1');
         GM_setValue('vine_context', JSON.stringify({ productTitle, asin }));
@@ -326,6 +327,7 @@ Consignes:
 {"title":"...", "body":"..."}
 `.trim();
         GM_setValue('vine_prompt', prompt);
+        GM_setValue('vine_sent','');
         GM_setValue('vine_result',''); GM_setValue('vine_raw','');
         GM_setValue('vine_owner', MY_TOKEN);
         GM_setValue('vine_context', JSON.stringify({ productTitle, asin, stars:n }));
@@ -687,29 +689,34 @@ Consignes:
     (async function run(){
       const prompt=GM_getValue('vine_prompt','');
       lastPrompt = prompt;
-      GM_setValue('vine_prompt',''); // consommé : évite un renvoi si la page est rechargée
       if(!prompt){
         GM_setValue('vine_chat_active','');
         chatStatus('Aucun prompt reçu depuis Amazon. Relance depuis le bouton Auto-avis.');
         return;
       }
-      chatStatus('Prompt reçu. Attente du chargement complet de ChatGPT...');
-      await wait(1000); // le composer est de toute façon attendu plus bas
+      // la page peut être rechargée (iOS) : si le prompt est déjà envoyé, on reprend l'attente sans le renvoyer
+      if(GM_getValue('vine_sent','') === prompt){
+        chatStatus('Reprise : attente de la réponse JSON…');
+      }else{
+        chatStatus('Prompt reçu. Attente du chargement complet de ChatGPT...');
+        await wait(1000); // le composer est de toute façon attendu plus bas
 
-      chatStatus('Insertion du prompt dans ChatGPT...');
-      const insertResult = await insertPromptDirect(prompt);
-      if(!insertResult.ok){
-        await copy(prompt);
-        GM_setValue('vine_chat_active','');
-        chatStatus(`Insertion échouée (${insertResult.step}, ${insertResult.tag || '?'}, ${insertResult.textLength || 0} car.). Prompt copié: Ctrl+V puis envoie.`);
-        return;
+        chatStatus('Insertion du prompt dans ChatGPT...');
+        const insertResult = await insertPromptDirect(prompt);
+        if(!insertResult.ok){
+          await copy(prompt);
+          GM_setValue('vine_chat_active','');
+          chatStatus(`Insertion échouée (${insertResult.step}, ${insertResult.tag || '?'}, ${insertResult.textLength || 0} car.). Prompt copié: Ctrl+V puis envoie.`);
+          return;
+        }
+        chatStatus('Prompt inséré. Tentative d’envoi...');
+        if (!await waitSendAndClick()){
+          const el = document.querySelector('div#prompt-textarea.ProseMirror[contenteditable="true"], #prompt-textarea[contenteditable="true"], textarea[name="prompt-textarea"]');
+          if(el) pressEnter({el});
+        }
+        GM_setValue('vine_sent', prompt);
+        chatStatus('Prompt envoyé. Attente de la réponse JSON...');
       }
-      chatStatus('Prompt inséré. Tentative d’envoi...');
-      if (!await waitSendAndClick()){
-        const el = document.querySelector('div#prompt-textarea.ProseMirror[contenteditable="true"], #prompt-textarea[contenteditable="true"], textarea[name="prompt-textarea"]');
-        if(el) pressEnter({el});
-      }
-      chatStatus('Prompt envoyé. Attente de la réponse JSON...');
 
       let done=false;
       const check=()=>{
@@ -720,6 +727,8 @@ Consignes:
           chatStatus('Réponse détectée. Retour vers Amazon...');
           GM_setValue('vine_raw', hit.raw);
           GM_setValue('vine_result', JSON.stringify(hit.obj)); // Amazon fermera l’onglet et reprendra le focus
+          GM_setValue('vine_sent','');
+          GM_setValue('vine_prompt','');
           GM_setValue('vine_chat_active','');
         }
       };
@@ -743,6 +752,8 @@ Consignes:
         check();
         if(!done){
           GM_setValue('vine_chat_active','');
+          GM_setValue('vine_sent','');
+          GM_setValue('vine_prompt','');
           chatStatus('Aucun JSON valide détecté après 4 minutes. Copie la réponse ChatGPT en JSON ou relance depuis Amazon.');
         }
       },240000);
