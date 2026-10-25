@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.2
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.3
 // @namespace    https://vine-local/
-// @version      8.3.2
+// @version      8.3.3
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -284,7 +284,7 @@ Consignes:
     function openChat(){
       try{ if(window.__vineChatTab && !window.__vineChatTab.closed) window.__vineChatTab.close(); }catch{}
       GM_setValue('vine_chat_active', String(Date.now()));
-      window.__vineChatTab = GM_openInTab('https://chatgpt.com/?vine=1', {active:true,insert:true,setParent:true});
+      window.__vineChatTab = GM_openInTab('https://chatgpt.com/?vine=1', {active:false,insert:true,setParent:true});
       try{ if(window.__vineChatTab) window.__vineChatTab.onclose = ()=> window.focus(); }catch{}
     }
 
@@ -493,7 +493,7 @@ Consignes:
         // ouvre ChatGPT (focus) ; il sera fermé quand la réponse arrivera
         try{ if(window.__vineChatTab && !window.__vineChatTab.closed){ window.__vineChatTab.close(); } }catch{}
         GM_setValue('vine_chat_active', String(Date.now()));
-        window.__vineChatTab = GM_openInTab('https://chatgpt.com/?vine=1', {active:true,insert:true,setParent:true});
+        window.__vineChatTab = GM_openInTab('https://chatgpt.com/?vine=1', {active:false,insert:true,setParent:true});
         try{ if(window.__vineChatTab) window.__vineChatTab.onclose = ()=> window.focus(); }catch{}
       }
     })();
