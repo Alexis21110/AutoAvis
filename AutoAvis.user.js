@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.0
+// @name         Amazon Vine: Auto-avis (liste + page avis) v8.3.1
 // @namespace    https://vine-local/
-// @version      8.3.0
+// @version      8.3.1
 // @description  Liste: bouton "⚡ Auto-avis" ; Page avis: "Générer via ChatGPT" + étoiles 3–5 cohérentes (sans note chiffrée). Ouvre ChatGPT avec handle TM, ferme ChatGPT depuis Amazon et refocus. Titre uniquement dans #reviewTitle. Debug masqué par défaut.
 // @updateURL    https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
 // @downloadURL  https://raw.githubusercontent.com/Alexis21110/AutoAvis/refs/heads/main/AutoAvis.user.js
@@ -284,7 +284,7 @@ Consignes:
     function openChat(){
       try{ if(window.__vineChatTab && !window.__vineChatTab.closed) window.__vineChatTab.close(); }catch{}
       GM_setValue('vine_chat_active', String(Date.now()));
-      window.__vineChatTab = GM_openInTab('https://chatgpt.com/?vine=1', {active:false,insert:true,setParent:true});
+      window.__vineChatTab = GM_openInTab('https://chatgpt.com/?vine=1', {active:true,insert:true,setParent:true});
       try{ if(window.__vineChatTab) window.__vineChatTab.onclose = ()=> window.focus(); }catch{}
     }
 
@@ -401,6 +401,7 @@ Consignes:
     }
 
     // barre de progression : suit l'étape côté ChatGPT et alerte si ça ne bouge plus
+    // overlay plein écran : bloque la page avis tant que l'avis n'est pas rempli ou abandonné
     const progress = {
       el: null,
       last: 0,
@@ -408,25 +409,32 @@ Consignes:
         if (!this.el){
           this.el = document.createElement('div');
           this.el.id = 'vine-progress';
-          this.el.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:999999;background:#111;color:#fff;padding:8px 14px;font:13px system-ui;display:none;box-shadow:0 4px 16px rgba(0,0,0,.3)';
+          this.el.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;font:14px system-ui';
           this.el.innerHTML = `
-            <div id="vp-msg" style="margin-bottom:6px"></div>
-            <div style="height:6px;background:#333;border-radius:3px;overflow:hidden">
-              <div style="height:100%;width:30%;background:#ffd814;border-radius:3px;animation:vp-move 1.2s linear infinite"></div>
+            <div style="background:#111;color:#fff;padding:20px 22px;border-radius:12px;width:min(420px,90vw);box-shadow:0 12px 40px rgba(0,0,0,.5)">
+              <div style="font-weight:700;margin-bottom:10px">Vine Auto-avis en cours</div>
+              <div id="vp-msg" style="margin-bottom:12px;line-height:1.4"></div>
+              <div style="height:6px;background:#333;border-radius:3px;overflow:hidden">
+                <div style="height:100%;width:30%;background:#ffd814;border-radius:3px;animation:vp-move 1.2s linear infinite"></div>
+              </div>
+              <div style="display:flex;justify-content:flex-end;margin-top:14px">
+                <button id="vp-close" style="background:#222;color:#fff;border:1px solid #555;border-radius:8px;padding:6px 10px;cursor:pointer">Annuler</button>
+              </div>
             </div>
             <style>@keyframes vp-move{0%{margin-left:-30%}100%{margin-left:100%}}</style>
           `;
+          this.el.querySelector('#vp-close').onclick = ()=> this.hide();
           document.documentElement.appendChild(this.el);
         }
-        this.el.style.display = 'block';
+        this.el.style.display = 'flex';
         this.el.querySelector('#vp-msg').textContent = msg;
         this.last = Date.now();
       },
       hide(){ if (this.el) this.el.style.display = 'none'; }
     };
     setInterval(()=>{
-      if (progress.el && progress.el.style.display === 'block' && Date.now() - progress.last > 90000){
-        progress.el.querySelector('#vp-msg').textContent = 'Pas de nouvelles de ChatGPT depuis 90 s. Vérifie l’onglet ChatGPT (panneau « Vine Auto-avis »).';
+      if (progress.el && progress.el.style.display === 'flex' && Date.now() - progress.last > 90000){
+        progress.el.querySelector('#vp-msg').textContent = 'Pas de nouvelles de ChatGPT depuis 90 s. Vérifie l’onglet ChatGPT (panneau « Vine Auto-avis ») ou annule.';
       }
     }, 5000);
 
@@ -485,7 +493,7 @@ Consignes:
         // ouvre ChatGPT (focus) ; il sera fermé quand la réponse arrivera
         try{ if(window.__vineChatTab && !window.__vineChatTab.closed){ window.__vineChatTab.close(); } }catch{}
         GM_setValue('vine_chat_active', String(Date.now()));
-        window.__vineChatTab = GM_openInTab('https://chatgpt.com/?vine=1', {active:false,insert:true,setParent:true});
+        window.__vineChatTab = GM_openInTab('https://chatgpt.com/?vine=1', {active:true,insert:true,setParent:true});
         try{ if(window.__vineChatTab) window.__vineChatTab.onclose = ()=> window.focus(); }catch{}
       }
     })();
@@ -713,9 +721,12 @@ Consignes:
       });
       obs.observe(document.body,{childList:true,subtree:true});
       const timer=setInterval(check,1500);
+      // diagnostic : indique toutes les 15 s combien de blocs ont été lus
+      const ticker=setInterval(()=>{ if(!done) chatStatus(`Attente de la réponse JSON… (${getCandidates().length} bloc(s) lu(s))`); },15000);
       setTimeout(()=>{
         obs.disconnect();
         clearInterval(timer);
+        clearInterval(ticker);
         check();
         if(!done){
           GM_setValue('vine_chat_active','');
